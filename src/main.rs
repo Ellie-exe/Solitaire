@@ -1,5 +1,9 @@
 use rand::{thread_rng, seq::SliceRandom};
 use std::{io, io::Write};
+use std::io::Stdout;
+use termion;
+use termion::input::TermRead;
+use termion::raw::{IntoRawMode, RawTerminal};
 
 struct Card {
     rank: i8,
@@ -48,12 +52,23 @@ fn main() {
     let mut states = Vec::new();
     initialize_table(&mut states);
 
-    println!("\n\n");
+    print!("{}", repeat_char('\n', 40));
+
+    let mut stdout = io::stdout().into_raw_mode().unwrap();
+    let mut stdin = termion::async_stdin().keys();
+
+    print_table(&mut stdout, states.last().unwrap(), "> ");
 
     loop {
-        let mut input = String::new();
-        print_table(states.last().unwrap(), "> ");
-        io::stdin().read_line(&mut input).unwrap();
+        let input = stdin.next();
+
+        if let Some(Ok(key)) = input {
+            match key {
+                termion::event::Key::Char('c') => { return; },
+                termion::event::Key::Char('r') => { print_table(&mut stdout, states.last().unwrap(), "> "); },
+                _ => {}
+            }
+        }
     }
 }
 
@@ -147,32 +162,32 @@ fn initialize_table(states: &mut Vec<State>) {
     states.push(state);
 }
 
-fn print_table(state: &State, prompt: &str) {
+fn print_table(stdout: &mut RawTerminal<Stdout>, state: &State, prompt: &str) {
     let max_lines = get_max_lines(state);
 
-    print!("\x1b[2A");
+    write!(stdout, "\x1b[1F").unwrap();
 
     for _ in 0..max_lines {
-        println!("\x1b[2K");
+        write!(stdout, "\x1b[2K\x1b[1E").unwrap();
     }
 
-    print!("\x1b[0J\x1b[{}A", max_lines);
+    write!(stdout, "\x1b[0J\x1b[{}F", max_lines).unwrap();
 
-    print_prompt(state, prompt);
-    print!("\x1b[3E");
-    print_stock(state);
-    print!("\x1b[10A\x1b[1C");
-    print_waste(state);
-    print!("\x1b[10A\x1b[1C");
-    print_foundations(state);
-    print!("\x1b[2E");
-    print_tableau(state);
+    print_prompt(stdout, state, prompt);
+    write!(stdout, "\x1b[3E").unwrap();
+    print_stock(stdout, state);
+    write!(stdout, "\x1b[10A\x1b[1C").unwrap();
+    print_waste(stdout, state);
+    write!(stdout, "\x1b[10A\x1b[1C").unwrap();
+    print_foundations(stdout, state);
+    write!(stdout, "\x1b[2E").unwrap();
+    print_tableau(stdout, state);
 
-    print!("\x1b[u");
-    io::stdout().flush().unwrap();
+    write!(stdout, "\x1b[u").unwrap();
+    stdout.flush().unwrap();
 }
 
-fn print_prompt(state: &State, prompt: &str) {
+fn print_prompt(stdout: &mut RawTerminal<Stdout>, state: &State, prompt: &str) {
     let score_len = state.score.to_string().len() as i8;
     let prompt_len = prompt.len() as i8;
 
@@ -183,31 +198,31 @@ fn print_prompt(state: &State, prompt: &str) {
     let remaining_dashes = repeat_char('─', remaining_width);
     let remaining_spaces = repeat_char(' ', remaining_width);
 
-    print!("┌────────{}─┬─{}{}─┐\x1b[1E", score_dashes, prompt_dashes, remaining_dashes);
-    print!("│ Score: {} │ {}{} │\x1b[1E", state.score, prompt, remaining_spaces);
-    print!("└────────{}─┴─{}{}─┘", score_dashes, prompt_dashes, remaining_dashes);
+    write!(stdout, "┌────────{}─┬─{}{}─┐\x1b[1E", score_dashes, prompt_dashes, remaining_dashes).unwrap();
+    write!(stdout, "│ Score: {} │ {}{} │\x1b[1E", state.score, prompt, remaining_spaces).unwrap();
+    write!(stdout, "└────────{}─┴─{}{}─┘", score_dashes, prompt_dashes, remaining_dashes).unwrap();
 
-    print!("\x1b[1F\x1b[{}C\x1b[s", 12 + score_len + prompt_len);
+    write!(stdout, "\x1b[1F\x1b[{}C\x1b[s", 12 + score_len + prompt_len).unwrap();
 }
 
-fn print_stock(state: &State) {
+fn print_stock(stdout: &mut RawTerminal<Stdout>, state: &State) {
     let num_cards = state.stock.cards.len();
 
     let card: &str;
     if num_cards > 0 { card = &state.stock.cards.last().unwrap().back; }
     else { card = &state.stock.empty; }
 
-    print!("Stock\x1b[1E");
-    print!("({} Cards)\x1b[1E", num_cards);
-    print!("{}", card);
+    write!(stdout, "Stock\x1b[1E").unwrap();
+    write!(stdout, "({} Cards)\x1b[1E", num_cards).unwrap();
+    write!(stdout, "{}", card).unwrap();
 }
 
-fn print_waste(state: &State) {
+fn print_waste(stdout: &mut RawTerminal<Stdout>, state: &State) {
     let num_cards = state.waste.cards.len();
     let num_digits = num_cards.to_string().len();
 
-    print!("Waste\x1b[1B\x1b[5D");
-    print!("({} Cards)\x1b[1B\x1b[{}D", num_cards, 8 + num_digits);
+    write!(stdout, "Waste\x1b[1B\x1b[5D").unwrap();
+    write!(stdout, "({} Cards)\x1b[1B\x1b[{}D", num_cards, 8 + num_digits).unwrap();
 
     let mut num_spaces = 14;
     let mut last_card = state.waste.empty.clone();
@@ -218,11 +233,11 @@ fn print_waste(state: &State) {
             let end = num_cards - 1;
 
             for card in &state.waste.cards[start..end] {
-                print!("{}\x1b[8D ", card.face);
+                write!(stdout, "{}\x1b[8D ", card.face).unwrap();
                 num_spaces -= 6;
 
                 for _ in 0..8 {
-                    print!("\x1b[1A\x1b[1D ");
+                    write!(stdout, "\x1b[1A\x1b[1D ").unwrap();
                 }
             }
         }
@@ -230,27 +245,27 @@ fn print_waste(state: &State) {
         last_card = state.waste.cards.last().unwrap().face.clone();
     }
 
-    print!("{}\x1b[{}C", last_card, num_spaces);
+    write!(stdout, "{}\x1b[{}C", last_card, num_spaces).unwrap();
 }
 
-fn print_foundations(state: &State) {
+fn print_foundations(stdout: &mut RawTerminal<Stdout>, state: &State) {
     for i in 0..4 {
         let foundation = &state.foundations[i];
 
         let num_cards = foundation.cards.len();
         let num_digits = num_cards.to_string().len();
 
-        print!("Foundation {}\x1b[1B\x1b[12D", i + 1);
-        print!("({} Cards)\x1b[1B\x1b[{}D", num_cards, 8 + num_digits);
+        write!(stdout, "Foundation {}\x1b[1B\x1b[12D", i + 1).unwrap();
+        write!(stdout, "({} Cards)\x1b[1B\x1b[{}D", num_cards, 8 + num_digits).unwrap();
 
-        if num_cards > 0 { print!("{}", foundation.cards.last().unwrap().face); }
-        else { print!("{}", foundation.empty); }
+        if num_cards > 0 { write!(stdout, "{}", foundation.cards.last().unwrap().face).unwrap(); }
+        else { write!(stdout, "{}", foundation.empty).unwrap(); }
 
-        if i < 3 { print!("\x1b[10A\x1b[1C"); }
+        if i < 3 { write!(stdout, "\x1b[10A\x1b[1C").unwrap(); }
     }
 }
 
-fn print_tableau(state: &State) {
+fn print_tableau(stdout: &mut RawTerminal<Stdout>, state: &State) {
     for i in 0..7 {
         let column = &state.tableau[i];
 
@@ -258,28 +273,28 @@ fn print_tableau(state: &State) {
         let num_digits = num_cards.to_string().len();
         let mut num_lines = (num_cards as i8 * 2) + 9;
 
-        print!("Column {}\x1b[1B\x1b[8D", i + 1);
-        print!("({} Cards)\x1b[1B\x1b[{}D", num_cards, 8 + num_digits);
+        write!(stdout, "Column {}\x1b[1B\x1b[8D", i + 1).unwrap();
+        write!(stdout, "({} Cards)\x1b[1B\x1b[{}D", num_cards, 8 + num_digits).unwrap();
 
         if num_cards > 0 {
             for card in &column.cards {
-                if card.flip == true { print!("{}", card.face); }
-                else { print!("{}", card.back); }
+                if card.flip == true { write!(stdout, "{}", card.face).unwrap(); }
+                else { write!(stdout, "{}", card.back).unwrap(); }
 
-                print!("\x1b[6A\x1b[13D");
+                write!(stdout, "\x1b[6A\x1b[13D").unwrap();
             }
 
-            print!("\x1b[6B\x1b[13C");
+            write!(stdout, "\x1b[6B\x1b[13C").unwrap();
 
         } else {
-            print!("{}", column.empty);
+            write!(stdout, "{}", column.empty).unwrap();
             num_lines += 2;
         }
 
         let difference = get_max_lines(state) - num_lines + 16;
 
-        if i < 6 { print!("\x1b[{}A\x1b[1C", num_lines - 1); }
-        else if difference > 0 { print!("\x1b[{}B", difference); }
+        if i < 6 { write!(stdout, "\x1b[{}A\x1b[1C", num_lines - 1).unwrap(); }
+        else if difference > 0 { write!(stdout, "\x1b[{}B", difference).unwrap(); }
     }
 }
 
